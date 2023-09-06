@@ -1,0 +1,333 @@
+#Paolo Vezio ;D
+# this program works with just Kp = 20 when the external clock is selected.
+import tkinter as tk
+from tkinter import messagebox, ttk
+import serial
+from serial.tools import list_ports
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import numpy as np
+import time
+
+class Channel:
+    def __init__(self, master):
+        self.frequency = tk.DoubleVar(master)
+        self.amplitude = tk.DoubleVar(master)
+        self.phase = tk.DoubleVar(master)
+        self.state = tk.StringVar(master, "Off")
+
+
+root = tk.Tk()
+root.title("DDS AD9959 Controller")
+channels = [Channel(root) for _ in range(4)]
+clock_mode = tk.StringVar(root)
+clock_frequency = tk.DoubleVar(root)
+kp_value = tk.DoubleVar(root)
+
+serial_ports = []
+serial_combobox = {}
+
+#boudrate = 19200 #115200  
+timeout = 1
+
+# Main Frame
+main_frame = tk.Frame(root)
+main_frame.pack(fill=tk.BOTH, expand=True)
+boud_rate = [19200, 115200]  
+
+
+
+def log_error(error_message):
+    output_text.insert(tk.END, f"{error_message}\n")
+    output_text.see(tk.END)
+
+
+def handle_exception(exc_type, exc_value, exc_traceback):
+    # error messages
+    messagebox.showerror("Error", f"An error occurred:\n{exc_value}")
+    # Add an error to the errors log
+    error_log_window.log_error(str(exc_value))
+    error_log_window.see(tk.END)
+    # Error printing
+    import traceback
+    traceback.print_exception(exc_type, exc_value, exc_traceback)
+
+error_log_window = tk.Text(root, height=0, width=0)
+
+
+#reading the serail port
+def discover_serial_ports():
+    # Serial port list
+    ports = list(list_ports.comports())
+    serial_ports.clear()  # Reset
+    for port in ports:
+        serial_ports.append(port.device)
+    serial_combobox['values'] = serial_ports  # Add values in combobox
+#reset the DDS
+def rest():
+    boudrate = BR_combox.get()
+    selected_port = serial_combobox.get()
+    ser = serial.Serial(selected_port, boudrate, timeout=timeout)
+    send_command('R', ser)
+    output_text.insert(tk.END, "Reset\n")
+#clr comand to reset the DDS to the original settings
+def clr():
+    boudrate = BR_combox.get()
+    selected_port = serial_combobox.get()
+    ser = serial.Serial(selected_port, boudrate, timeout=timeout)
+    send_command('CLR', ser)
+    output_text.insert(tk.END, "CLR\n")
+#Save the setting
+def save():
+    boudrate = BR_combox.get()
+    selected_port = serial_combobox.get()
+    ser = serial.Serial(selected_port, boudrate, timeout=timeout)
+    send_command('S', ser)
+    output_text.insert(tk.END, "Saved\n")
+#frequency format max  7 digits
+def format_frequency(frequency):
+    return f"{frequency:.7f} MHz"
+#Send a single comand
+def send_command(command,ser):
+    ser.write((command + '\r\n').encode())
+    time.sleep(0.01)
+#Select the serial port
+def select_serial_port():
+    selected_port = serial_combobox.get()
+    if selected_port:
+        output_text.insert(tk.END, f"Selected Serial Port: {selected_port}\n")
+    else:
+        output_text.insert(tk.END, "No serial port selected.\n")
+#Selct the BoudRate
+def select_BR():
+    selected_BR = BR_combox.get()
+    if selected_BR:
+        output_text.insert(tk.END, f"Selected BR: {selected_BR}\n")
+    else:
+        output_text.insert(tk.END, "No serial port selected.\n")
+#update the serial port
+def update_serial_ports():
+    discover_serial_ports()
+
+#Sweep function 
+def start_sweep():
+    boudrate = BR_combox.get()
+    start_freq = float(start_freq_entry.get())
+    end_freq = float(end_freq_entry.get())
+    amplitude = float(sweep_amp_entry.get())
+    channel = sweep_channel_combobox.current()
+    interval = float(sweep_interval_entry.get())
+    num_points = int(sweep_points_entry.get())
+    frequencies = np.linspace(start_freq, end_freq, num_points)
+    selected_port = serial_combobox.get()
+    ser = serial.Serial(selected_port, boudrate, timeout=timeout)
+
+    clock_mode_value = clock_mode.get()
+    if not clock_mode_value:
+        output_text.insert(tk.END,"Error: Clock mode not selected\n")
+        return
+    if amplitude < 0 or amplitude > 1:
+        output_text.insert(tk.END, f"Error: ch{channel} Amplitude must be between 0 e 1\n")
+    else:
+        send_command(f'V{channel} {int(1023 * amplitude)}', ser)
+
+
+        if clock_mode_value == "Ext":
+            clock_frequency_value = clock_frequency.get()
+            kp_value_value = kp_value.get()
+            if clock_frequency_value == 0 or kp_value_value == 0:
+                output_text.insert(tk.END, f"Error: Clock freq of Kp different 0\n")
+            else:
+                Kpe = int(kp_value_value)
+                Kpi = 15
+                Fic = 28.633115306666667 * 1e6
+                Fec = round(clock_frequency_value, 7)*1e6  #ottimal frequency: 21.47483648*1e6 
+                if Kpe == 20:
+                    send_command('Kp 14',ser)
+                for frequency in frequencies:
+                    output_text.insert(tk.END, f"ferquency: {frequency}\n")
+                    send_command(f'F{channel} {round(frequency* (Kpi * Fic) / (Kpe * Fec), 7)}', ser)
+                    time.sleep(interval)
+        else:
+            for frequency in frequencies:
+                send_command(f'F{channel} {round(frequency,7)}', ser)
+                time.sleep(interval)
+
+#sending parameters to the DDS
+def send_parameters():
+    boudrate = BR_combox.get()
+    active_channels = [channel for channel in channels if channel.frequency.get() > 0]
+    selected_port = serial_combobox.get()
+    ser = serial.Serial(selected_port, boudrate, timeout=timeout)
+    clock_mode_value = clock_mode.get()
+    if not clock_mode_value:
+        output_text.insert(tk.END,"Error: Clock mode not selected\n")
+        return
+    if not active_channels:
+        output_text.insert(tk.END, "Error: open at list a channel\n")
+    clock_mode_value = clock_mode.get()
+
+    if clock_mode_value == "Ext":
+        send_command('C E',ser)
+        clock_frequency_value = clock_frequency.get()
+        kp_value_value = kp_value.get()
+        output_text.insert(tk.END, f"Freq_Clock: {clock_frequency_value}\n")
+        if clock_frequency_value == 0 or kp_value_value == 0:
+            output_text.insert(tk.END, f"Error: Clock freq of Kp different 0\n")
+        else:
+            for i, channel in enumerate(active_channels):
+                if channel.amplitude.get() < 0 or channel.amplitude.get() > 1:
+                    output_text.insert(tk.END, f"Error: ch{i} Amplitude must be between 0 e 1\n")
+                if channel.phase.get() < 0 or channel.phase.get() > 1:
+                    output_text.insert(tk.END, f"Error: ch{i} Phase must be between 0 e 1\n")
+
+                Kpe = int(kp_value_value)
+                Kpi = 15
+                Fic = 28.633115306666667 * 1e6
+                Fec = round(clock_frequency_value, 7) * 1e6  # ottimal frequency: 21.47483648*1e6 
+
+                if Kpe == 20:
+                    send_command('Kp 14',ser)  # kp = 1 put 01, kp = 4 to 20 put 04 to 14
+		
+                setting = {
+                    "CH": i,
+                    "Freq": round(channel.frequency.get() * (Kpi * Fic) / (Kpe * Fec), 7),
+                    "Phase": int(channel.phase.get() * (360 / 16384)),
+                    "Amp": int(1023 * channel.amplitude.get())
+                }
+
+                send_command(f'F{setting["CH"]} {setting["Freq"]}', ser)
+                send_command(f'P{setting["CH"]} {setting["Phase"]}', ser)
+                send_command(f'V{setting["CH"]} {setting["Amp"]}', ser)
+    else:
+        send_command(f'C I', ser)
+        for i, channel in enumerate(active_channels):
+            if channel.amplitude.get() < 0 or channel.amplitude.get() > 1:
+                output_text.insert(tk.END, f"Error: ch{i} Amplitude must be between 0 e 1\n")
+            if channel.phase.get() < 0 or channel.phase.get() > 1:
+                output_text.insert(tk.END, f"Error: ch{i} Phase must be between 0 e 1\n")
+            setting = {
+                "CH": i,
+                "Freq": channel.frequency.get(),
+                "Phase": int(channel.phase.get() * (360 / 16384)),
+                "Amp": int(1023 * channel.amplitude.get())
+            }
+            send_command(f'F{setting["CH"]} {setting["Freq"]}', ser)
+            send_command(f'P{setting["CH"]} {setting["Phase"]}', ser)
+            send_command(f'V{setting["CH"]} {setting["Amp"]}', ser)
+
+####-------------------- Graphic Interface --------------------------------------------####
+# SERIAL POR:
+discover_serial_ports()
+serial_frame = tk.Frame(main_frame)
+serial_frame.pack(side=tk.TOP, padx=15, pady=15)
+serial_label = tk.Label(serial_frame, text="Serial Port:")
+serial_label.pack(side=tk.LEFT)
+serial_combobox = ttk.Combobox(serial_frame, values=serial_ports,width =12)
+serial_combobox.pack(side=tk.LEFT)
+update_ports_button = tk.Button(serial_frame, text="Update serial Port", command=update_serial_ports)
+update_ports_button.pack(side=tk.LEFT)
+select_port_button = tk.Button(serial_frame, text="Select Serail Port", command=select_serial_port)
+select_port_button.pack(side=tk.LEFT)
+# BOUD RATE:
+select_label_BR = tk.Label(serial_frame, text="BR:")
+select_label_BR.pack(side=tk.LEFT)
+BR_combox = ttk.Combobox(serial_frame, values=boud_rate, width =6)
+BR_combox.pack(side=tk.LEFT)
+BR_button = tk.Button(serial_frame, text="Bound Rate", command=select_BR)
+BR_button.pack(side=tk.LEFT)
+# CLOCK:
+clock_frame = tk.Frame(main_frame)
+clock_frame.pack(side=tk.TOP, padx=0, pady=10)
+clock_mode_label = tk.Label(clock_frame, text="Clock Mode:")
+clock_mode_label.pack()
+clock_mode_radiobutton1 = tk.Radiobutton(clock_frame, text="Int", variable=clock_mode, value="Int")
+clock_mode_radiobutton1.pack(side=tk.RIGHT)
+clock_mode_radiobutton2 = tk.Radiobutton(clock_frame, text="Ext", variable=clock_mode, value="Ext")
+clock_mode_radiobutton2.pack(side=tk.RIGHT)
+clock_frequency_label = tk.Label(clock_frame, text="Ext Clock Freq (MHz):")
+clock_frequency_label.pack(side=tk.LEFT)
+clock_frequency_entry = tk.Entry(clock_frame, textvariable=clock_frequency, width=15)
+clock_frequency_entry.pack(side=tk.LEFT)
+kp_label = tk.Label(clock_frame, text="Kp:")
+kp_label.pack(side=tk.LEFT)
+kp_entry = tk.Entry(clock_frame, textvariable=kp_value, width=8)
+kp_entry.pack(side=tk.LEFT)
+# CHANNELS:
+frequency_entries = []
+amplitude_entries = []
+phase_entries = []
+channel_state_buttons = []
+CH_frame = tk.Frame(main_frame)
+CH_frame.pack(side=tk.TOP)
+for i in range(4):
+    channel_frame = tk.Frame(CH_frame)
+    channel_frame.pack()
+    frequency_label = tk.Label(channel_frame, text=f"CH {i} - Freq (MHz):")
+    frequency_label.pack(side=tk.LEFT)
+    frequency_entry = tk.Entry(channel_frame, textvariable=channels[i].frequency, width=15)
+    frequency_entry.pack(side=tk.LEFT)
+    amplitude_label = tk.Label(channel_frame, text="Amp:")
+    amplitude_label.pack(side=tk.LEFT)
+    amplitude_entry = tk.Entry(channel_frame, textvariable=channels[i].amplitude, width=5)
+    amplitude_entry.pack(side=tk.LEFT)
+    phase_label = tk.Label(channel_frame, text="Phase:")
+    phase_label.pack(side=tk.LEFT)
+    phase_entry = tk.Entry(channel_frame, textvariable=channels[i].phase, width=5)
+    phase_entry.pack(side=tk.LEFT)
+# SWEEP:
+sweep_frame = tk.Frame(main_frame)
+sweep_frame.pack(side=tk.TOP)
+sweep_frame = tk.Frame(sweep_frame)
+sweep_frame.pack()
+start_freq_label = tk.Label(sweep_frame, text="Start Freq (MHz):")
+start_freq_label.pack(side=tk.LEFT)
+start_freq_entry = tk.Entry(sweep_frame, width=15)
+start_freq_entry.pack(side=tk.LEFT)
+end_freq_label = tk.Label(sweep_frame, text="End Freq (MHz):")
+end_freq_label.pack(side=tk.LEFT)
+end_freq_entry = tk.Entry(sweep_frame, width=15)
+end_freq_entry.pack(side=tk.LEFT)
+sweep_amp_label = tk.Label(sweep_frame, text="Amp:")
+sweep_amp_label.pack(side=tk.LEFT)
+sweep_amp_entry = tk.Entry(sweep_frame, width=4)
+sweep_amp_entry.pack(side=tk.LEFT)
+sweep_channel_label = tk.Label(sweep_frame, text="CH:")
+sweep_channel_label.pack(side=tk.LEFT)
+sweep_channel_combobox = ttk.Combobox(sweep_frame, values=[f"Ch {i}" for i in range(4)], width=4)
+sweep_channel_combobox.pack(side=tk.LEFT)
+sweep_interval_label = tk.Label(sweep_frame, text="dT (s):")
+sweep_interval_label.pack(side=tk.LEFT)
+sweep_interval_entry = tk.Entry(sweep_frame, width=5)
+sweep_interval_entry.pack(side=tk.LEFT)
+sweep_points_label = tk.Label(sweep_frame, text="# Points:")
+sweep_points_label.pack(side=tk.LEFT)
+sweep_points_entry = tk.Entry(sweep_frame, width=5)
+sweep_points_entry.pack(side=tk.LEFT)
+start_sweep_button = tk.Button(sweep_frame, text="Start Sweep", command=start_sweep)
+start_sweep_button.pack(side=tk.LEFT)
+# DDS SETTING:
+setting_frame = tk.Frame(main_frame)
+setting_frame.pack(side=tk.TOP, padx=15, pady=15)
+open_serial_button = tk.Button(setting_frame , text="Reset Setting", command=rest)
+open_serial_button.pack(side=tk.LEFT)
+open_serial_button = tk.Button(setting_frame , text="CLR", command=clr)
+open_serial_button.pack(side=tk.LEFT)
+open_serial_button = tk.Button(setting_frame , text="Save Setting", command=save)
+open_serial_button.pack(side=tk.LEFT)
+open_serial_button = tk.Button(setting_frame , text="Send Setting", command=send_parameters)
+open_serial_button.pack(side=tk.LEFT)
+# ERROR WINDOW:
+text_frame = tk.Frame(main_frame)
+text_frame.pack(side=tk.LEFT, padx=10, pady=10, fill=tk.X)
+text_label = tk.Label(text_frame, text="Message:")
+text_label.pack(side=tk.LEFT)
+output_text = tk.Text(root, height=10, width=130)
+output_text.pack(side=tk.LEFT, padx=10, pady=10, fill=tk.BOTH)
+output_scrollbar = tk.Scrollbar(root)
+output_scrollbar.pack(side=tk.LEFT, fill=tk.Y)
+output_text.config(yscrollcommand=output_scrollbar.set)
+output_scrollbar.config(command=output_text.yview)
+
+
+root.mainloop()
