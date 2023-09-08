@@ -7,4 +7,5 @@ It is possible to select also:
     this means that the real clock frequency is f_ext * Kp.
   - Frequency, Amplitude, Phase of 4 channels
   - It is possible to Sending, Save, reset, CLK the channels setting,
-  - 
+I implement a Sweep function where is possible to select the start and end frequency, 
+the channel and the amplitude the number of frequencies and the time interval between (minimun is 0.01s)
