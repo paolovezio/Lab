@@ -1,0 +1,10 @@
+Python interfaces of a DDS AD9959 by using a serial port RS232.
+In the interface is possible reading the serial ports and using the program for many DDS simultaneusly. 
+In the program it is possible to select the boud rate between 2 values.
+It is possible to select also:
+  - Clock: internal or external
+  - Frequency of the external clock (f_ext) and only one value of the multiplier Kp = 20, 
+    this means that the real clock frequency is f_ext * Kp.
+  - Frequency, Amplitude, Phase of 4 channels
+  - It is possible to Sending, Save, reset, CLK the channels setting,
+  - 
